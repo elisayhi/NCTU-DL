@@ -1,3 +1,4 @@
+import sys
 import torch
 import numpy as np
 import torch.utils.data as Data
@@ -17,7 +18,7 @@ def train(model, loss_func, loader, device, optimizer):
     train_loss = 0
     pred = []
     for step, (x, y) in enumerate(loader):
-        x = x.float()
+        x = x.float()   # x shape: (batch_size, 1 layer, 2 channels, attrs) = (512, 1, 2, 720)
         y = y.long()
         optimizer.zero_grad()
         output = model(x.to(device))
@@ -50,9 +51,9 @@ def accuracy(true, pred):
     acc = same/len(true)*100
     return acc
 
-if __name__ == '__main__':
+def train_eval(MODEL, name):
     LR = 0.05
-    EPOCH = 1500
+    EPOCH = 2000
     batch_size = 512
     device = torch.device('cuda:1')
     # load data
@@ -62,12 +63,13 @@ if __name__ == '__main__':
     test_dataloader = Data.DataLoader(Data.TensorDataset(ts_X, ts_y), batch_size=len(ts_y))
 
     loss_func = nn.CrossEntropyLoss()
-    model = EEGNet().to(device)
+    model = MODEL
+    model = model.to(device)
     print(model)
     train_loss, test_loss = [], []
     train_acc, test_acc = [], []
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
-    schedular = torch.optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma = 0.5)
+    schedular = torch.optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma = 0.8)
     for epoch in range(EPOCH):
         schedular.step()
         tr_loss, tr_pred = train(model, loss_func, train_dataloader, device, optimizer)
@@ -77,10 +79,14 @@ if __name__ == '__main__':
         train_acc.append(accuracy(tr_y, tr_pred))
         test_acc.append(accuracy(ts_y, ts_pred))
 
-        if epoch%50 == 0:
+        if epoch%100 == 0:
             print(f'[epoch {epoch}]\ttrain loss: {train_loss[-1]}\ttrain acc: {train_acc[-1]}%', end='\t')
             print(f'test loss: {test_loss[-1]}\ttest acc: {test_acc[-1]}%')
         torch.cuda.empty_cache()
-    plot([train_loss, test_loss, train_acc, test_acc], ['train loss', 'test loss', 'train acc', 'test acc'])
+    plot([train_loss, test_loss, train_acc, test_acc], ['train loss', 'test loss', 'train acc', 'test acc'], 'result/'+name+'.png')
 
-
+if __name__ == '__main__':
+    if sys.argv[1] == 'EEG':
+        train_eval(EEGNet(), 'EEG')
+    elif sys.argv[1] == 'deepc':
+        train_eval(DeepConvNet(), 'DeepConvNet')

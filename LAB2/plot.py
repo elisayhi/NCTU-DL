@@ -3,7 +3,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use('Agg')
 
-def plot(datas, names):
+def plot(datas, names, figname):
     """
     datas: data to print, [data1, data2, ...]
     names: name according to data, [name1. name2, ...]
@@ -12,4 +12,4 @@ def plot(datas, names):
     for data, name in zip(datas, names):
         plt.plot(data, label=name)
         plt.legend(loc=0)
-    plt.savefig('result.png')
+    plt.savefig(figname)
