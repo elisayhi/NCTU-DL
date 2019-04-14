@@ -1,4 +1,5 @@
 import pickle
+import torchvision.models
 import numpy as np
 import torch.utils.data as Data
 from torch import nn
@@ -66,32 +67,43 @@ if __name__ == '__main__':
     parser.add_argument('-m', dest='model', default=18)
     parser.add_argument('-p', help='use pertrain or not', dest='pretrain', default=0, type=int)
     args = parser.parse_args()
-    model = args.model
     # parameter
     EPOCH = 10
+    BSIZE = 8
     device = torch.device('cuda:1')
 
     # load data
-    train_dataloader = Data.DataLoader(RetinopathyLoader('data', 'train'), batch_size=4)
-    test_dataloader = Data.DataLoader(RetinopathyLoader('data', 'test'), batch_size=4)
+    train_dataloader = Data.DataLoader(RetinopathyLoader('data', 'train'), batch_size=BSIZE)
+    test_dataloader = Data.DataLoader(RetinopathyLoader('data', 'test'), batch_size=BSIZE)
 
     # model
     loss_func = nn.CrossEntropyLoss()
     if not args.pretrain:
-        if model == '18':
-            model = ResNet(BasicBlock, [2,2,2,2]).to(device)
+        if args.model == '18':
+            model = ResNet(BasicBlock, [2,2,2,2])
         else:
-            model = ResNet(BottleNeck, [3,4,23,3]).to(device)
+            model = ResNet(BottleNeck, [3,4,23,3])
+            EPOCH = 5
     else:
-        model = pResNet(int(model)).to(device)
-    print(model)
+        model = torchvision.models.__dict__['resnet{}'.format(int(args.model))](pretrained=True)
+        model.load_state_dict(model_zoo.load_url('https://download.pytorch.org/models/resnet18-5c106cde.pth'))
+        # replace the last 2 layer in the pretrained model to match the dataset
+        if args.model == '18':
+            model.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+            model.fc = nn.Linear(512, 5)
+        else:
+            model.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+            model.fc = nn.Linear(2048, 5)
+            EPOCH = 5
+    model = model.to(device)
+    #print(model)
 
     train_acc, test_acc = [], []
     ts_pred, ts_true = None, None
-    optimizer = torch.optim.SGD(model.parameters(), lr=1e-3, weight_decay=5e-4, momentum=0.9)
+    optimizer = torch.optim.SGD(model.parameters(), lr=5e-3, weight_decay=5e-4, momentum=0.9)
     for epoch in range(EPOCH+1):
         train_loss, tr_pred, tr_acc = train(model, loss_func, train_dataloader, device, optimizer)
-        test_loss, ts_acc, ts_pred, ts_true = test(model, loss_func, test_dataloader, device)
+        test_loss, ts_acc, ts_true, ts_pred = test(model, loss_func, test_dataloader, device)
         print(f'train loss {train_loss} test loss {test_loss}')
         print(f'train acc {tr_acc} test acc {ts_acc}')
         train_acc.append(tr_acc)
