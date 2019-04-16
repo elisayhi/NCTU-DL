@@ -77,7 +77,7 @@ if __name__ == '__main__':
     EPOCH = 10
     lr = args.lr
     BSIZE = args.bsize
-    device = torch.device('cuda:1')
+    device = torch.device('cuda:0')
     name = f'{args.model}_{args.pretrain}_{args.bsize}'
 
     # load data
@@ -130,10 +130,11 @@ if __name__ == '__main__':
         with open(f'result/{name}_output.pickle', 'wb') as f:
             pickle.dump({'pred': ts_pred, 'true': ts_true,
                 'train_acc': train_acc, 'test_acc': test_acc}, f)
-        if len(train_acc) < 2 or test_acc[-1] > test_acc[-2]:
+        if len(train_acc) < 2 or test_acc[-1] > test_acc[-2] or test_acc[-1] > 79:
             with open(f'result/{name}_{test_acc[-1]}_weight.pickle', 'wb') as f:
                 pickle.dump(model.state_dict(), f)
-    with open(f'result/{name}_weight_final.pickle', 'wb') as f:
-        pickle.dump(model.state_dict(), f)
+        else:
+            with open(f'result/{name}_weight.pickle', 'wb') as f:
+                pickle.dump(model.state_dict(), f)
             
 
