@@ -78,8 +78,12 @@ def tensorFromSentence(lang, sentence):
 
 
 def tensorsFromPair(pair, condition):
-    input_tensor = tensorFromSentence(input_lang, pair[condition[0]])
-    target_tensor = tensorFromSentence(output_lang, pair[condition[1]])
+    if type(condition) == list:
+        input_tensor = tensorFromSentence(input_lang, pair[condition[0]])
+        target_tensor = tensorFromSentence(output_lang, pair[condition[1]])
+    else:
+        input_tensor = tensorFromSentence(input_lang, pair[condition])
+        target_tensor = input_tensor
     return (input_tensor, target_tensor)
 
 ######################################################################
@@ -127,13 +131,13 @@ class EncoderRNN(nn.Module):
 
     def initHidden(self, cond):
         #return torch.zeros(1, 1, self.hidden_size, device=device)  # VAE
-        # CVAE
-        zero = torch.zeros(1, 1, self.hidden_size-8, device=device)
-        condition = torch.tensor([[ onehot(cond[0])+onehot(cond[1]) ]], device=device).float()
+        # CVAE condition
+        zero = torch.zeros(1, 1, self.hidden_size-4, device=device)
+        condition = torch.tensor([[ onehot(cond) ]], device=device).float()
         return torch.cat((zero, condition), 2)
 
 class AttnDecoderRNN(nn.Module):
-    def __init__(self, hidden_size, output_size, latent_size=40, dropout_p=0.1, max_length=MAX_LENGTH):
+    def __init__(self, hidden_size, output_size, latent_size=36, dropout_p=0.1, max_length=MAX_LENGTH):
         super(AttnDecoderRNN, self).__init__()
         self.hidden_size = hidden_size
         self.output_size = output_size
@@ -150,7 +154,7 @@ class AttnDecoderRNN(nn.Module):
 
     def forward(self, input_tensor, hidden, encoder_outputs, cond, is_head):
         if is_head:
-            cond = onehot(cond[0]) + onehot(cond[1])
+            cond = onehot(cond)
             hidden = torch.cat((hidden, torch.tensor([[cond]], device=device).float()), 2)
             hidden = self.latent2decoder(hidden)
         embedded = self.embedding(input_tensor).view(1, 1, -1)
@@ -289,10 +293,11 @@ def trainIters(encoder, decoder, n_iters, print_every=1000, plot_every=100, lear
 
     encoder_optimizer = optim.SGD(encoder.parameters(), lr=learning_rate)
     decoder_optimizer = optim.SGD(decoder.parameters(), lr=learning_rate)
-    conditions = [[random.randint(0, 3) for _ in range(2)] for __ in range(n_iters)]
+    #conditions = [[random.randint(0, 3) for _ in range(2)] for __ in range(n_iters)]
+    conditions = [random.randint(0, 3) for __ in range(n_iters)]    # input = target
     training_pairs = [tensorsFromPair(random.choice(pairs), conditions[i]) for i in range(n_iters)]
-    #criterion = nn.NLLLoss()
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.NLLLoss()
+    #criterion = nn.CrossEntropyLoss()
 
     for it in tqdm(range(1, n_iters + 1)):
     #for it in range(1, n_iters + 1):
@@ -354,7 +359,7 @@ def evaluate(encoder, decoder, sentence, cond, max_length=MAX_LENGTH):
     with torch.no_grad():
         input_tensor = tensorFromSentence(input_lang, sentence)
         input_length = input_tensor.size()[0]
-        encoder_hidden = encoder.initHidden(cond)
+        encoder_hidden = encoder.initHidden(cond[0])
 
         encoder_outputs = torch.zeros(max_length, encoder.hidden_size, device=device)
 
@@ -369,7 +374,7 @@ def evaluate(encoder, decoder, sentence, cond, max_length=MAX_LENGTH):
         decoder_attentions = torch.zeros(max_length, max_length)
 
         for di in range(max_length):
-            decoder_output, decoder_hidden, decoder_attention = decoder(decoder_input, decoder_hidden, encoder_outputs, cond, di==0)
+            decoder_output, decoder_hidden, decoder_attention = decoder(decoder_input, decoder_hidden, encoder_outputs, cond[1], di==0)
             decoder_attentions[di] = decoder_attention.data
             topv, topi = decoder_output.data.topk(1)
             if topi.item() == EOS_token:
@@ -406,7 +411,7 @@ def evaluateRandomly(encoder, decoder, n=10):
         print('')
 
 
-def evaluateAll(encoder, decoder, it):#, n=10):
+def evaluateAll(encoder, decoder, it, save_file=True):#, n=10):
     ts_pairs, ts_conditions = [], []
     with open('data/test.txt', 'r') as f:
         lines = f.read().strip().split('\n')
@@ -425,11 +430,12 @@ def evaluateAll(encoder, decoder, it):#, n=10):
         bleu_score += calc_bleu(output_sentence, pair[1])
         correct += int(output_sentence==pair[1])
     acc = correct/len(ts_pairs)
-    if acc >= 0.7:
-        with open(f'result/encoder_{acc}.pk', 'wb') as f:
-            pickle.dump(encoder.state_dict(), f)
-        with open(f'result/decoder_{acc}.pk', 'wb') as f:
-            pickle.dump(decoder.state_dict(), f)
+    if save_file:
+        if acc >= 0.7:
+            with open(f'result/encoder_{acc}.pk', 'wb') as f:
+                pickle.dump(encoder.state_dict(), f)
+            with open(f'result/decoder_{acc}.pk', 'wb') as f:
+                pickle.dump(decoder.state_dict(), f)
     return bleu_score / len(ts_pairs)
 
 
@@ -469,16 +475,16 @@ def main(n_iters):
     attn_decoder1 = AttnDecoderRNN(hidden_size, output_lang.n_words, dropout_p=0.1).to(device)
 
     # reload model
-    with open('result/model3/encoder_0.9.pk', 'rb') as f:
-        encoder_weight = pickle.load(f)
-    with open('result/model3/decoder_0.9.pk', 'rb') as f:
-        decoder_weight = pickle.load(f)
-    encoder1.load_state_dict(encoder_weight)
-    attn_decoder1.load_state_dict(decoder_weight)
+    #with open('result/model3/encoder_0.9.pk', 'rb') as f:
+    #    encoder_weight = pickle.load(f)
+    #with open('result/model3/decoder_0.9.pk', 'rb') as f:
+    #    decoder_weight = pickle.load(f)
+    #encoder1.load_state_dict(encoder_weight)
+    #attn_decoder1.load_state_dict(decoder_weight)
 
 
     trainIters(encoder1, attn_decoder1, n_iters, print_every=5000)
-    print(f'bleu score: {evaluateAll(encoder1, attn_decoder1)}')
+    print(f'bleu score: {evaluateAll(encoder1, attn_decoder1, n_iters, save_file=False)}')
 
 if __name__ == '__main__':
     parser = ArgumentParser()
