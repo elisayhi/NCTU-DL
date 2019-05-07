@@ -19,7 +19,7 @@ from tqdm import tqdm
 from torch import optim
 from io import open
 from argparse import ArgumentParser
-from nltk.translate.bleu_score import sentence_bleu
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 
 device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
@@ -204,6 +204,7 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
     # encoder
     encoder_outputs = torch.zeros(max_length, encoder.hidden_size, device=device)
     loss = 0
+    KL_losses = []
     for ei in range(input_length):
         encoder_output, encoder_hidden, en_mean, en_logvar = encoder(input_tensor[ei], encoder_hidden)
         encoder_outputs[ei] = encoder_output[0, 0]
@@ -211,8 +212,6 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
     # decoder
     decoder_input = torch.tensor([[SOS_token]], device=device)
     # add condition
-    print(encoder_outputs, encoder_outputs.size())
-    exit()
     decoder_hidden = reparameter(en_mean, en_logvar)
     use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
     if use_teacher_forcing:
@@ -222,18 +221,19 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
             decoder_output, decoder_hidden, decoder_attention = decoder(decoder_input, decoder_hidden, encoder_outputs, condition, di==0)
             N_loss, KL_loss = loss_func(decoder_output, target_tensor[di], criterion, en_mean, en_logvar)
             loss += (N_loss + KL_weight * KL_loss)
+            KL_losses.append(KL_loss)
             decoder_input = target_tensor[di]  # Teacher forcing
 
     else:
         # Without teacher forcing: use its own predictions as the next input
         for di in range(target_length):
-            #print(f'di: {di}')
             decoder_output, decoder_hidden, decoder_attention = decoder(decoder_input, decoder_hidden, encoder_outputs, condition,  di==0)
             topv, topi = decoder_output.topk(1)
             decoder_input = topi.squeeze().detach()  # detach from history as input
 
             N_loss, KL_loss = loss_func(decoder_output, target_tensor[di], criterion, en_mean, en_logvar)
             loss += (N_loss + KL_weight * KL_loss)
+            KL_losses.append(KL_loss)
             if decoder_input.item() == EOS_token:
                 break
 
@@ -282,9 +282,10 @@ def timeSince(since, percent):
 
 def trainIters(encoder, decoder, n_iters, print_every=1000, plot_every=100, learning_rate=0.01):
     start = time.time()
-    plot_losses = []
+    #plot_losses = []
     print_loss_total = 0  # Reset every print_every
-    plot_loss_total = 0  # Reset every plot_every
+    #plot_loss_total = 0  # Reset every plot_every
+    kl_losses = []
 
     encoder_optimizer = optim.SGD(encoder.parameters(), lr=learning_rate)
     decoder_optimizer = optim.SGD(decoder.parameters(), lr=learning_rate)
@@ -294,29 +295,31 @@ def trainIters(encoder, decoder, n_iters, print_every=1000, plot_every=100, lear
     criterion = nn.CrossEntropyLoss()
 
     for it in tqdm(range(1, n_iters + 1)):
+    #for it in range(1, n_iters + 1):
         training_pair = training_pairs[it - 1]
         #print(training_pair)
         input_tensor = training_pair[0]
         target_tensor = training_pair[1]
 
+        kl_weight = 1 / (5000-(it%5000)) if it>20000 else 0
         loss = train(input_tensor, target_tensor, encoder,
-                     decoder, encoder_optimizer, decoder_optimizer, criterion, conditions[it-1], KL_weight=0.001*(it//3000))
+                     decoder, encoder_optimizer, decoder_optimizer, criterion, conditions[it-1], KL_weight=kl_weight)#0.001*(it//3000))
         print_loss_total += loss
-        plot_loss_total += loss
+        #plot_loss_total += loss
 
+        kl_losses.append(evaluateAll(encoder, decoder, it))
         if it % print_every == 0:
             print_loss_avg = print_loss_total / print_every
             print_loss_total = 0
             print('%s (%d %d%%) %.4f' % (timeSince(start, it / n_iters),
                                          it, it / n_iters * 100, print_loss_avg))
-            #evaluateAll(encoder1, attn_decoder1)
+        if it % 1000:
+            with open('result/kl_loss.pk', 'wb') as f:
+                pickle.dump(kl_losses, f)
 
-        if it % plot_every == 0:
-            plot_loss_avg = plot_loss_total / plot_every
-            plot_losses.append(plot_loss_avg)
-            plot_loss_total = 0
-
-    #showPlot(plot_losses)
+        if it == n_iters:
+            with open('result/last_model.pk', 'wb') as f:
+                pickle.dump({'encoder': encoder.state_dict(), 'decoder': decoder.state_dict()}, f)
 
 
 ######################################################################
@@ -403,7 +406,7 @@ def evaluateRandomly(encoder, decoder, n=10):
         print('')
 
 
-def evaluateAll(encoder, decoder, n=10):
+def evaluateAll(encoder, decoder, it):#, n=10):
     ts_pairs, ts_conditions = [], []
     with open('data/test.txt', 'r') as f:
         lines = f.read().strip().split('\n')
@@ -411,27 +414,28 @@ def evaluateAll(encoder, decoder, n=10):
     ts_pairs = lines[:, (0,1)]
     ts_conditions = [i.split(',') for i in lines[:, 2]]
     ts_conditions = np.array(ts_conditions, dtype=int)
-    #print(ts_pairs, ts_conditions)
     correct = 0
     bleu_score = 0
     for pair, cond in zip(ts_pairs, ts_conditions):
-        #pair = random.choice(pairs)
-        print('input:', pair[0])
+        #print('input:', pair[0])
         #print('=', pair[1])
         output_words, attentions = evaluate(encoder, decoder, pair[0], cond)
-        print('output', ''.join(output_words[:-1]))
-        bleu_score += sentence_bleu(list(pair), output_words[:-1])
+        output_sentence = ''.join(output_words[:-1])
+        #print('output', output_sentence)
+        bleu_score += calc_bleu(output_sentence, pair[1])
         correct += int(output_sentence==pair[1])
     acc = correct/len(ts_pairs)
-    bleu_score /= len(ts_pairs)
     if acc >= 0.7:
         with open(f'result/encoder_{acc}.pk', 'wb') as f:
             pickle.dump(encoder.state_dict(), f)
         with open(f'result/decoder_{acc}.pk', 'wb') as f:
             pickle.dump(decoder.state_dict(), f)
-    print(f'accuracy: {acc}\nbleu score: {bleu_score}')
+    return bleu_score / len(ts_pairs)
 
 
+def calc_bleu(output, ref):
+    cc = SmoothingFunction()
+    return sentence_bleu([ref], output, weights=(0.25, 0.25, 0.25, 0.25), smoothing_function=cc.method1)
 
 ######################################################################
 # Training and Evaluating
@@ -464,8 +468,17 @@ def main(n_iters):
     #print(input_lang.n_words, output_lang.n_words)
     attn_decoder1 = AttnDecoderRNN(hidden_size, output_lang.n_words, dropout_p=0.1).to(device)
 
+    # reload model
+    with open('result/model3/encoder_0.9.pk', 'rb') as f:
+        encoder_weight = pickle.load(f)
+    with open('result/model3/decoder_0.9.pk', 'rb') as f:
+        decoder_weight = pickle.load(f)
+    encoder1.load_state_dict(encoder_weight)
+    attn_decoder1.load_state_dict(decoder_weight)
+
+
     trainIters(encoder1, attn_decoder1, n_iters, print_every=5000)
-    evaluateAll(encoder1, attn_decoder1)
+    print(f'bleu score: {evaluateAll(encoder1, attn_decoder1)}')
 
 if __name__ == '__main__':
     parser = ArgumentParser()
