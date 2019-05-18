@@ -71,10 +71,11 @@ class Trainer:
         c = np.linspace(-1, 1, 10).reshape(1, -1)
         c = np.repeat(c, 10, 0).reshape(-1, 1)
 
-        c1 = np.hstack([c, np.zeros_like(c)])
-        c2 = np.hstack([np.zeros_like(c), c])
+        #c1 = np.hstack([c, np.zeros_like(c)])
+        #c2 = np.hstack([np.zeros_like(c), c])
 
-        idx = np.arange(10).repeat(10)
+        #idx = np.arange(10).repeat(10)
+        idx = np.resize(np.arange(10), 10*10)
         one_hot = np.zeros((100, 10))
         one_hot[range(100), idx] = 1
         fix_noise = torch.Tensor(100, 54).uniform_(-1, 1)
@@ -86,7 +87,6 @@ class Trainer:
                 optimD.zero_grad()
 
                 x, _ = batch_data
-                #print('[y]', _.view(100, 1, 1, 1).size(), _[1], _.view(100, 1, 1, 1)[1])
 
                 bs = x.size(0)
                 real_x.data.resize_(x.size())
@@ -136,9 +136,8 @@ class Trainer:
                 optimG.step()
 
                 # tensorboard
-                #writer.add_scalars('result/losses', {'real': loss_real, 'fake': loss_fake, 'reconstruct': reconstruct_loss, 'dis': dis_loss}, num_iters)
-                writer.add_scalars(f'result/losses/{epoch}', {'D_loss': D_loss.data.cpu().numpy(), 'G_loss': reconstruct_loss.data.cpu().numpy(),
-                    'Q_loss': dis_loss.data.cpu().numpy()}, num_iters)
+                writer.add_scalars('result/losses', {'D_loss': D_loss.data.cpu().numpy(), 'G_loss': reconstruct_loss.data.cpu().numpy(),
+                    'Q_loss': dis_loss.data.cpu().numpy()}, num_iters + len(dataloader)*epoch)
 
                 if num_iters % 500 == 0:
 
