@@ -1,6 +1,8 @@
 import torch
+import pickle
 import numpy as np
 
+from tqdm import tqdm
 from torch import nn
 from torch import optim
 from torch import autograd
@@ -13,6 +15,7 @@ from torchvision.utils import save_image, make_grid
 from model import *
 
 device = torch.device('cuda:1')
+name = '_1'
 
 class log_gaussian:
 
@@ -78,11 +81,11 @@ class Trainer:
         idx = np.resize(np.arange(10), 10*10)
         one_hot = np.zeros((100, 10))
         one_hot[range(100), idx] = 1
-        fix_noise = torch.Tensor(100, 54).uniform_(-1, 1)
+        fix_noise = torch.Tensor(100, 54).normal_(-1, 1)
 
         writer = SummaryWriter()
-        for epoch in range(100):
-            for num_iters, batch_data in enumerate(dataloader, 0):
+        for epoch in tqdm(range(100)):
+            for num_iters, batch_data in enumerate(tqdm(dataloader, 0)):
                 # train by real data
                 optimD.zero_grad()
 
@@ -127,24 +130,28 @@ class Trainer:
                 q_logits, q_mu, q_var = self.Q(fe_out)
                 q_logits = q_logits.squeeze()
                 target = torch.LongTensor(idx).to(device)
-                #target = Variable(class_)
                 dis_loss = criterionQ_dis(q_logits, target)
-                #con_loss = criterionQ_con(con_c, q_mu, q_var)*0.1
 
                 G_loss = reconstruct_loss + dis_loss# + con_loss
                 G_loss.backward()
                 optimG.step()
 
+                probs_fake_after = self.D(self.FE(self.G(z)))
+
                 # tensorboard
-                writer.add_scalars('result/losses', {'D_loss': D_loss.data.cpu().numpy(), 'G_loss': reconstruct_loss.data.cpu().numpy(),
+                writer.add_scalars('result/losses'+name, {'D_loss': D_loss.data.cpu().numpy(), 
+                    'G_loss': reconstruct_loss.data.cpu().numpy(),
                     'Q_loss': dis_loss.data.cpu().numpy()}, num_iters + len(dataloader)*epoch)
+                writer.add_scalars('result/probs'+name, {'real_before': probs_real.mean().data.cpu().numpy(), 
+                    'fake_before': probs_fake.mean().data.cpu().numpy(),
+                    'fake_after': probs_fake_after.mean().data.cpu().numpy()}, num_iters + len(dataloader)*epoch)
 
                 if num_iters % 500 == 0:
 
-                    print('Epoch/Iter:{0}/{1}, Dloss: {2}, Gloss: {3}'.format(
-                      epoch, num_iters, D_loss.data.cpu().numpy(),
-                      G_loss.data.cpu().numpy())
-                    )
+                    #print('Epoch/Iter:{0}/{1}, Dloss: {2}, Gloss: {3}'.format(
+                    #  epoch, num_iters, D_loss.data.cpu().numpy(),
+                    #  G_loss.data.cpu().numpy())
+                    #)
 
                     noise.data.copy_(fix_noise)
                     dis_c.data.copy_(torch.Tensor(one_hot))
@@ -152,11 +159,12 @@ class Trainer:
                     #con_c.data.copy_(torch.from_numpy(c1))
                     z = torch.cat([noise, dis_c], 1).view(-1, self.noise_dim, 1, 1)
                     x_save = self.G(z)
-                    save_image(x_save.data, './tmp/c.png', nrow=10)
+                    save_image(x_save.data, './tmp/c_1.png', nrow=10)
                     G_result = make_grid(x_save.data, nrow=10, padding=0)
-                    writer.add_image('generator_result', G_result, epoch)
+                    writer.add_image('generator_result'+name, G_result, epoch)
 
-                    #con_c.data.copy_(torch.from_numpy(c2))
-                    #z = torch.cat([noise, dis_c], 1).view(-1, 64, 1, 1)
-                    #x_save = self.G(z)
-                    #save_image(x_save.data, './tmp/c2.png', nrow=10)
+                    # save file
+                    with open('result/result_model.pk', 'wb') as f:
+                        pickle.dump({'Q': self.Q.state_dict(), 'D': self.D.state_dict(),
+                            'G': self.G.state_dict(), 'FE': self.FE.state_dict()}, f)
+
