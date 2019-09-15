@@ -721,13 +721,12 @@ public:
 	 */
 	state select_best_move(const board& b) const {
 		state after[4] = { 0, 1, 2, 3 }; // up, right, down, left
-		vector<state*> moves;
 		state* best = after;
 		for (state* move = after; move != after + 4; move++) {
 			if (move->assign(b)) {
 				// r+V(s') = move->reward() + estimate(move->after_state())
 				//move->set_value(move->reward() + estimate(move->after_state()));	// r+V(s')	// set esti
-				move->set_value(move->reward() + sum_all_possible_next_state(move->after_state()));
+				move->set_value(move->reward() + sum_all_possible_next_state(*move));
 				if (move->value() > best->value())
 					best = move;
 			} else {
@@ -735,10 +734,20 @@ public:
 			}
 			debug << "test " << *move;
 		}
-		//cout << *best << endl;
 		return *best;
 	}
 
+	//float calc_2nd_next_state(const board& b) const {
+	//	state after[4] = { 0, 1, 2, 3 }; // up, right, down, left
+	//	float ret_val = 0;
+	//	for (state* move = after; move != after + 4; move++) {
+	//		if (move->assign(b)) {
+	//			ret_val += sum_all_possible_next_state(*move);
+	//		}
+	//	}
+	//	return ret_val;
+	//}
+	
 	/**
 	 * calculate value of all possible next state, multiplied with P, and sum them up
 	 */
@@ -752,6 +761,7 @@ public:
 			board* b = new board(*after_b);
 			b->popup(i, 1);
 			ttl_value += (estimate(*b)) / empty_num * 0.9;
+			delete b;
 
 			b = new board(*after_b);
 			b->popup(i, 2);
@@ -762,6 +772,7 @@ public:
 
 		return ttl_value;
 	}
+
 
 	/**
 	 * update the tuple network by an episode
@@ -832,15 +843,18 @@ public:
 			int stat[16] = { 0 };
 			int tmp;
 			// save scores
-			ofstream log;
-			log.open("result/scores_4tuple.txt", ios::out | ios::binary | ios::app);
+			//ofstream log;
+			//log.open("", ios::out | ios::binary | ios::app);
 			for (int i = 0; i < 16; i++) {
 				tmp = count(maxtile.begin(), maxtile.end(), i);
 				stat[i] = tmp;
-				log << tmp << '\t';
+				//if (log.is_open()) 
+				//	log << tmp << '\t';
 			}
-			log << endl;
-			log.close();
+			//if (log.is_open()) {
+			//	log << endl;
+			//}
+			//log.close();
 			float mean = float(sum) / unit;
 			float coef = 100.0 / unit;
 			info << n;
@@ -905,8 +919,8 @@ public:
 				info << feat->name() << " is saved to " << path << endl;
 			}
 			out.flush();
-			out.close();
 		}
+		out.close();
 	}
 
 private:
@@ -920,8 +934,8 @@ int main(int argc, const char* argv[]) {
 	learning tdl;
 
 	// set the learning parameters
-	float alpha = 0.05;
-	size_t total = 200000;
+	float alpha = 0.1;
+	size_t total = 100000;
 	unsigned seed;
 	__asm__ __volatile__ ("rdtsc" : "=a" (seed));
 	info << "alpha = " << alpha << endl;
@@ -930,17 +944,20 @@ int main(int argc, const char* argv[]) {
 	srand(seed);
 
 	// initialize the features
-	//tdl.add_feature(new pattern({ 0, 1, 2, 3, 4, 5 }));
-	//tdl.add_feature(new pattern({ 4, 5, 6, 7, 8, 9 }));
-	//tdl.add_feature(new pattern({ 0, 1, 2, 4, 5, 6 }));
-	//tdl.add_feature(new pattern({ 4, 5, 6, 8, 9, 10 }));
-	tdl.add_feature(new pattern({ 0, 1, 4, 5 }));
-	tdl.add_feature(new pattern({ 4, 5, 8, 9 }));
-	tdl.add_feature(new pattern({ 1, 2, 3, 7 }));
-	tdl.add_feature(new pattern({ 5, 9, 10, 11 }));
-
+	tdl.add_feature(new pattern({ 0, 1, 2, 3, 4, 5 }));
+	tdl.add_feature(new pattern({ 4, 5, 6, 7, 8, 9 }));
+	tdl.add_feature(new pattern({ 0, 1, 2, 4, 5, 6 }));
+	tdl.add_feature(new pattern({ 4, 5, 6, 8, 9, 10 }));
+	//tdl.add_feature(new pattern({ 0, 1, 4, 5 }));
+	//tdl.add_feature(new pattern({ 4, 5, 8, 9 }));
+	//tdl.add_feature(new pattern({ 1, 2, 3, 7 }));
+	//tdl.add_feature(new pattern({ 5, 9, 10, 11 }));
+	//tdl.add_feature(new pattern({ 4, 8, 12, 13 }));
+	//tdl.add_feature(new pattern({ 9, 10, 11, 15 }));
+	//tdl.add_feature(new pattern({ 9, 10, 13, 14 }));
+    
 	// restore the model from file
-	tdl.load("");
+	tdl.load("result/__model_3");
 
 	// train the model
 	vector<state> path;
@@ -971,14 +988,21 @@ int main(int argc, const char* argv[]) {
 		// update by TD(0)
 		tdl.update_episode(path, alpha);
 		tdl.make_statistic(n, b, score);
+		//save score
+		ofstream log;
+		log.open("result/score_plot_1.txt", ios::out | ios::binary | ios::app);
+		if(log.is_open()) {
+			log << score << '\t';
+		}
+		log.close();
 		path.clear();
 
 		if ((n+1) % 10000 == 0)
-			tdl.save("result/model_4tuple.txt");
+			tdl.save("result/__model_3");
 	}
 
 	// store the model into file
-	tdl.save("result/model_4tuple.txt");
+	tdl.save("");
 
 	return 0;
 }
